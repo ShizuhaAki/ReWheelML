@@ -4,6 +4,8 @@
 #include <vector>
 using namespace std;
 
+enum class InitType { Xavier, Kaiming, Uniform, Normal };
+
 class NDArray {
    private:
     vector<double> data;
@@ -45,4 +47,8 @@ class NDArray {
     vector<int> broadcast_shape(const NDArray& r) const;
     NDArray elementwise_broadcast(const NDArray& r,
                                   function<double(double, double)> fn) const;
+
+    // Add this method to NDArray
+    NDArray slice(int row_start, int row_end) const;
+    void init_weights(InitType type = InitType::Kaiming);
 };

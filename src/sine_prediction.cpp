@@ -1,6 +1,7 @@
 #include <cfenv>
 #include <cmath>
 #include <format>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <numbers>
@@ -35,9 +36,15 @@ class SinePredictor : public Module {
     std::vector<std::unique_ptr<Module>> layers;
 
    public:
-    SinePredictor() {
-        layers.push_back(std::make_unique<Dense>(1, 16));
-        layers.push_back(std::make_unique<Dense>(16, 1, "linear"));
+    SinePredictor(int hidden_size, int n_hidden_layers, string activation) {
+        layers.push_back(std::make_unique<Dense>(1, hidden_size, activation));
+        if (n_hidden_layers > 1) {
+            for (int i = 0; i < n_hidden_layers - 1; i++) {
+                layers.push_back(std::make_unique<Dense>(
+                    hidden_size, hidden_size, activation));
+            }
+        }
+        layers.push_back(std::make_unique<Dense>(hidden_size, 1, "linear"));
     }
     NDArray forward(const NDArray& x) {
         auto out = x;
@@ -77,24 +84,57 @@ int main(int argc, char** argv) {
     make_dataset(eval_samples = ini.GetInteger("data", "eval_size", 100),
                  eval_x, eval_y);
 
-    SinePredictor model;
+    int hidden_size = ini.GetInteger("model", "hidden_size", 16);
+    int n_hidden_layers = ini.GetInteger("model", "hidden_layers", 2);
+    string activation = ini.Get("model", "activation", "sigmoid");
+    SinePredictor model(hidden_size, n_hidden_layers, activation);
     auto lr = ini.GetFloat("train", "lr", 0.01);
     auto epoches = ini.GetInteger("train", "epoches", 20);
 
+    int batch_size = ini.GetInteger("train", "batch_size", 16);
+
     for (int i = 1; i <= epoches; i++) {
         cout << format("Epoch {}/{}: ", i, epoches);
-        auto pred = model.forward(train_x);
-        auto loss = mean_squared_error(pred, train_y).mean(0, false);
-        auto grad = (pred - train_y) * 2 / train_samples;
-        model.backward(grad);
-        model.step(lr);
-        auto loss_value = loss[0];
-        cout << "loss: " << loss_value << endl;
+        double epoch_loss = 0.0;
 
-        // cout << "Evaluating on validation set...";
-        // auto eval_pred = model.forward(eval_x);
-        // auto eval_loss = mean_squared_error(eval_pred, eval_y).mean(0,
-        // false); cout << "Evaluation loss: " << eval_loss[0] << endl;
+        for (int start = 0; start < train_samples; start += batch_size) {
+            int end = min(start + batch_size, train_samples);
+            auto batch_x =
+                train_x.slice(start, end);
+            auto batch_y = train_y.slice(start, end);
+
+            auto pred = model.forward(batch_x);
+            auto loss = mean_squared_error(pred, batch_y).mean(0, false);
+            epoch_loss +=
+                loss[0] * (end - start);
+
+            auto grad = (pred - batch_y) * 2 / (end - start);
+            model.backward(grad);
+            model.step(lr);
+        }
+
+        cout << "loss: " << (epoch_loss / train_samples) << endl;
+
+        cout << "Evaluating on validation set...";
+        auto eval_pred = model.forward(eval_x);
+        auto eval_loss = mean_squared_error(eval_pred, eval_y).mean(0, false);
+        cout << "Evaluation loss: " << eval_loss[0] << endl;
+
+        cout << "Example predictions:\n";
+        NDArray example_x({5, 1});
+        NDArray example_y({5, 1});
+        string fname = format("sine_plot_{}.csv", i);
+        std::ofstream fout(fname);
+        int points = 200;
+        for (int i = 0; i <= points; i++) {
+            double x_val =
+                -numbers::pi + i * 2 * numbers::pi / points;
+            NDArray x({1, 1});
+            x.set({0, 0}, x_val);
+            NDArray y_pred = model.forward(x);
+            fout << x_val << "," << y_pred[0] << "," << sin(x_val) << "\n";
+        }
+        fout.close();
     }
 
     return 0;

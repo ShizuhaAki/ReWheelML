@@ -3,6 +3,7 @@
 #include <format>
 #include <functional>
 #include <numeric>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 
@@ -66,6 +67,7 @@ void NDArray::set(const vector<int>& index, double value) {
 
 NDArray NDArray::for_each_element(function<double(double)> fn) const {
     auto result = NDArray(shape);
+#pragma omp parallel for
     for (int i = 0; i < numel; i++) {
         result.data[i] = fn(data[i]);
     }
@@ -75,6 +77,7 @@ NDArray NDArray::for_each_element(function<double(double)> fn) const {
 NDArray NDArray::for_each_element_indexed(
     function<double(double, int)> fn) const {
     auto result = NDArray(shape);
+#pragma omp parallel for
     for (int i = 0; i < numel; i++) {
         result.data[i] = fn(data[i], i);
     }
@@ -123,6 +126,7 @@ NDArray NDArray::matmul(const NDArray& r) const {
     auto K = shape.at(shape.size() - 1);
     auto N = r.shape.at(r.shape.size() - 1);
     auto result = NDArray({M, N});
+#pragma omp parallel for collapse(2)
     for (int i = 0; i < M; i++) {
         for (int j = 0; j < N; j++) {
             double sum = 0;
@@ -257,4 +261,58 @@ NDArray NDArray::elementwise_broadcast(
     }
 
     return result;
+}
+NDArray NDArray::slice(int row_start, int row_end) const {
+    int rows = row_end - row_start;
+    NDArray out({rows, shape[1]});  // keep same number of columns
+#pragma omp parallel for
+    for (int i = 0; i < rows; i++) {
+        for (int j = 0; j < shape[1]; j++) {
+            out.set({i, j}, this->get({row_start + i, j}));
+        }
+    }
+    return out;
+}
+
+void NDArray::init_weights(InitType type) {
+    if (numel == 0) return;
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    double scale = 1.0;
+
+    if (ndim < 2)
+        throw std::runtime_error(
+            "Weight initialization requires at least 2D tensor");
+
+    int fan_in = shape[1];
+    int fan_out = shape[0];
+
+    switch (type) {
+        case InitType::Xavier:
+            scale = std::sqrt(2.0 / (fan_in + fan_out));
+            break;
+        case InitType::Kaiming:
+            scale = std::sqrt(2.0 / fan_in);
+            break;
+        case InitType::Uniform:
+            scale = 0.05;  // small uniform range
+            break;
+        case InitType::Normal:
+            scale = 0.02;  // small normal std
+            break;
+    }
+
+    std::uniform_real_distribution<double> uni_dist(-scale, scale);
+    std::normal_distribution<double> norm_dist(0.0, scale);
+
+    for (int i = 0; i < numel; ++i) {
+        if (type == InitType::Normal || type == InitType::Kaiming ||
+            type == InitType::Xavier) {
+            data[i] = norm_dist(gen);
+        } else {
+            data[i] = uni_dist(gen);
+        }
+    }
 }

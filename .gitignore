@@ -81,3 +81,6 @@ Thumbs.db
 
 # vendor include libraries
 include/vendor/**
+
+# plotting 
+plot.py

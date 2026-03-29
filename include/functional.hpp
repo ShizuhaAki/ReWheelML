@@ -24,6 +24,14 @@ inline NDArray sigmoid_grad(const NDArray& y, const NDArray& grad_out) {
     return y.for_each_element_indexed(
         [&](double v, int idx) { return grad_out[idx] * v * (1.0 - v); });
 }
+inline NDArray tanh_fwd(const NDArray& x) {
+    return x.for_each_element([](double v) { return std::tanh(v); });
+}
+
+inline NDArray tanh_grad(const NDArray& y, const NDArray& grad_out) {
+    return y.for_each_element_indexed(
+        [&](double v, int idx) { return grad_out[idx] * (1.0 - v * v); });
+}
 inline NDArray mean_squared_error(const NDArray& pred, const NDArray& target) {
     auto diff = pred - target;
     return diff * diff;

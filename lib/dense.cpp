@@ -1,4 +1,5 @@
 #include "dense.hpp"
+
 #include <string>
 
 #include "functional.hpp"
@@ -15,7 +16,15 @@ Dense::Dense(int input_dim, int output_dim, string activation) {
     } else if (activation == "linear") {
         activation_fn = linear;
         grad_fn = linear_grad;
+    } else if (activation == "relu") {
+        activation_fn = relu;
+        grad_fn = relu_grad;
+    } else if (activation == "tanh") {
+        activation_fn = tanh_fwd;
+        grad_fn = tanh_grad;
     }
+    W.init_weights();
+    b.init_weights();
 }
 
 NDArray Dense::forward(const NDArray& x) {
