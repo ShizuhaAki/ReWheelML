@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <string>
 #include <vector>
 using namespace std;
 
@@ -8,7 +9,7 @@ class NDArray {
     vector<double> data;
 
     void compute_strides();
-    bool check_same_shape(const NDArray& r);
+    bool check_same_shape(const NDArray& r) const;
     int offset(const vector<int>& index) const;
 
    public:
@@ -39,4 +40,9 @@ class NDArray {
     NDArray sum(int axis, bool keepdims);
     NDArray transpose2d();
     NDArray mean(int axis, bool keepdims);
+    string shape_str() const;
+
+    vector<int> broadcast_shape(const NDArray& r) const;
+    NDArray elementwise_broadcast(const NDArray& r,
+                                  function<double(double, double)> fn) const;
 };

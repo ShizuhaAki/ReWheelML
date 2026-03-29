@@ -1,3 +1,4 @@
+#include <cfenv>
 #include <cmath>
 #include <format>
 #include <iostream>
@@ -11,6 +12,7 @@
 #include "module.hpp"
 #include "ndarray.hpp"
 #include "vendor/inih.hpp"
+
 
 using namespace std;
 
@@ -35,7 +37,7 @@ class SinePredictor : public Module {
    public:
     SinePredictor() {
         layers.push_back(std::make_unique<Dense>(1, 16));
-        layers.push_back(std::make_unique<Dense>(16, 1));
+        layers.push_back(std::make_unique<Dense>(16, 1, "linear"));
     }
     NDArray forward(const NDArray& x) {
         auto out = x;
@@ -58,9 +60,10 @@ class SinePredictor : public Module {
     }
 };
 
-int main() {
+int main(int argc, char** argv) {
+    feenableexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW);
     // load configuration
-    INIReader ini("model.ini");
+    INIReader ini(argv[1]);
     if (ini.ParseError() != 0) {
         cerr << "failed to parse model.ini" << endl;
         return 0;
@@ -87,6 +90,11 @@ int main() {
         model.step(lr);
         auto loss_value = loss[0];
         cout << "loss: " << loss_value << endl;
+
+        // cout << "Evaluating on validation set...";
+        // auto eval_pred = model.forward(eval_x);
+        // auto eval_loss = mean_squared_error(eval_pred, eval_y).mean(0,
+        // false); cout << "Evaluation loss: " << eval_loss[0] << endl;
     }
 
     return 0;

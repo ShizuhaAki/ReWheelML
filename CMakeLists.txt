@@ -7,7 +7,7 @@ project(lab1
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "-fsanitize=undefined -Wall")
+set(CMAKE_CXX_FLAGS "-fsanitize=undefined,address -Wall -g -Werror")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 

@@ -8,7 +8,7 @@
 TEST_CASE("Dense layer forward, backward, and step") {
     int input_dim = 3;
     int output_dim = 2;
-    Dense layer(input_dim, output_dim);
+    Dense layer(input_dim, output_dim, "sigmoid");
 
     // Input batch of 2 samples
     NDArray x({2, input_dim});

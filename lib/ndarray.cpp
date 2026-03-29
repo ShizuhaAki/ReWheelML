@@ -2,8 +2,8 @@
 
 #include <format>
 #include <functional>
-#include <iostream>
 #include <numeric>
+#include <sstream>
 #include <stdexcept>
 
 NDArray::NDArray(const vector<int>& shape_list) {
@@ -35,7 +35,7 @@ int NDArray::offset(const vector<int>& index) const {
     return offset;
 }
 
-bool NDArray::check_same_shape(const NDArray& other) {
+bool NDArray::check_same_shape(const NDArray& other) const {
     return shape == other.shape;
 }
 
@@ -98,35 +98,19 @@ NDArray NDArray::operator/(const double s) const {
 }
 
 NDArray NDArray::operator+(const NDArray& r) const {
-    auto result = NDArray(shape);
-    for (int i = 0; i < numel; i++) {
-        result.data[i] = data[i] + r.data[i];
-    }
-    return result;
+    return elementwise_broadcast(r, [](double a, double b) { return a + b; });
 }
 
 NDArray NDArray::operator-(const NDArray& r) const {
-    auto result = NDArray(shape);
-    for (int i = 0; i < numel; i++) {
-        result.data[i] = data[i] - r.data[i];
-    }
-    return result;
+    return elementwise_broadcast(r, [](double a, double b) { return a - b; });
 }
 
 NDArray NDArray::operator*(const NDArray& r) const {
-    auto result = NDArray(shape);
-    for (int i = 0; i < numel; i++) {
-        result.data[i] = data[i] * r.data[i];
-    }
-    return result;
+    return elementwise_broadcast(r, [](double a, double b) { return a * b; });
 }
 
 NDArray NDArray::operator/(const NDArray& r) const {
-    auto result = NDArray(shape);
-    for (int i = 0; i < numel; i++) {
-        result.data[i] = data[i] / r.data[i];
-    }
-    return result;
+    return elementwise_broadcast(r, [](double a, double b) { return a / b; });
 }
 
 NDArray NDArray::matmul(const NDArray& r) const {
@@ -216,4 +200,61 @@ NDArray NDArray::mean(int axis, bool keepdims) {
     double divisor = static_cast<double>(shape[axis]);
 
     return s / divisor;  // uses operator/(double) defined earlier
+}
+
+string NDArray::shape_str() const {
+    stringstream ret;
+    ret << ndim;
+    ret << "[";
+    for (auto l : shape) ret << l << ",";
+    ret << "]";
+    string s;
+    ret >> s;
+    return s;
+}
+std::vector<int> NDArray::broadcast_shape(const NDArray& r) const {
+    int n = max(ndim, r.ndim);
+    vector<int> result_shape(n);
+
+    for (int i = 0; i < n; i++) {
+        int dim_a = (i < n - ndim) ? 1 : shape[i - (n - ndim)];
+        int dim_b = (i < n - r.ndim) ? 1 : r.shape[i - (n - r.ndim)];
+
+        if (dim_a != dim_b && dim_a != 1 && dim_b != 1) {
+            throw runtime_error(format("cannot broadcast shapes {} and {}",
+                                       shape_str(), r.shape_str()));
+        }
+        result_shape[i] = max(dim_a, dim_b);
+    }
+
+    return result_shape;
+}
+NDArray NDArray::elementwise_broadcast(
+    const NDArray& r, function<double(double, double)> fn) const {
+    vector<int> result_shape = broadcast_shape(r);
+    NDArray result(result_shape);
+
+    int n = result_shape.size();
+    vector<int> idx(n, 0);
+
+    for (int i = 0; i < result.numel; i++) {
+        int offset_a = 0, offset_b = 0;
+        for (int j = 0; j < n; j++) {
+            int dim_a = (j < n - ndim) ? 1 : shape[j - (n - ndim)];
+            int dim_b = (j < n - r.ndim) ? 1 : r.shape[j - (n - r.ndim)];
+            int idx_j = idx[j];
+
+            if (dim_a > 1) offset_a += idx_j * stride[j - (n - ndim)];
+            if (dim_b > 1) offset_b += idx_j * r.stride[j - (n - r.ndim)];
+        }
+
+        result.data[i] = fn(data[offset_a], r.data[offset_b]);
+        for (int j = n - 1; j >= 0; j--) {
+            idx[j]++;
+            if (idx[j] < result_shape[j]) break;
+            idx[j] = 0;
+        }
+    }
+
+    return result;
 }
