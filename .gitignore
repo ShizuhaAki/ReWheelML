@@ -1,0 +1,83 @@
+# ---- Build directories ----
+
+build/
+build-*/
+out/
+cmake-build-*/
+CMakeFiles/
+
+# ---- CMake generated files ----
+
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+
+# ---- Make / Ninja / others ----
+
+Makefile
+*.ninja
+.ninja_log
+.ninja_deps
+
+# ---- Binaries ----
+
+*.exe
+*.out
+*.app
+*.dll
+*.so
+*.dylib
+
+# ---- Object files ----
+
+*.o
+*.obj
+*.lo
+*.slo
+
+# ---- Static / shared libs ----
+
+*.a
+*.lib
+
+# ---- Debug / profiling ----
+
+*.pdb
+*.ilk
+*.dSYM/
+*.stackdump
+gmon.out
+
+# ---- IDEs ----
+
+# VSCode
+
+.vscode/
+
+# CLion / JetBrains
+
+.idea/
+
+# Visual Studio
+
+.vs/
+*.vcxproj*
+*.sln
+*.filters
+*.user
+
+# ---- OS junk ----
+
+.DS_Store
+Thumbs.db
+.cache
+
+# ---- Misc ----
+
+*.log
+*.tmp
+*.swp
+
+# vendor include libraries
+include/vendor/**
