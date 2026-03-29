@@ -1,5 +1,7 @@
 #pragma once
 #include <functional>
+#include <memory>
+#include <span>
 #include <string>
 #include <vector>
 using namespace std;
@@ -8,7 +10,8 @@ enum class InitType { Xavier, Kaiming, Uniform, Normal };
 
 class NDArray {
    private:
-    vector<double> data;
+    shared_ptr<vector<double>> owned;
+    span<double> data;
 
     void compute_strides();
     bool check_same_shape(const NDArray& r) const;

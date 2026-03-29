@@ -6,16 +6,20 @@
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <cblas.h>
 
 NDArray::NDArray(const vector<int>& shape_list) {
     shape = shape_list;
     ndim = shape_list.size();
     numel = reduce(shape.begin(), shape.end(), 1, multiplies<int>());
-    data.resize(numel);
+
+    owned = make_shared<vector<double>>(numel);
+    data = span<double>(*owned);
+
     compute_strides();
 }
 
-NDArray::NDArray() {}
+NDArray::NDArray() : owned(make_shared<vector<double>>()), data(*owned) {}
 
 void NDArray::compute_strides() {
     stride.resize(ndim);
@@ -117,28 +121,25 @@ NDArray NDArray::operator/(const NDArray& r) const {
 }
 
 NDArray NDArray::matmul(const NDArray& r) const {
-    if (shape.at(shape.size() - 1) != r.shape.at(r.shape.size() - 2)) {
+    if (ndim != 2 || r.ndim != 2) {
+        throw runtime_error("matmul currently requires two 2D arrays");
+    }
+    if (shape[1] != r.shape[0]) {
         throw runtime_error(std::format("dimension mismatch: this {}, that {}",
-                                        shape.at(shape.size() - 1),
-                                        r.shape.at(r.shape.size() - 2)));
+                                        shape[1], r.shape[0]));
     }
-    auto M = shape.at(shape.size() - 2);
-    auto K = shape.at(shape.size() - 1);
-    auto N = r.shape.at(r.shape.size() - 1);
-    auto result = NDArray({M, N});
-#pragma omp parallel for collapse(2)
-    for (int i = 0; i < M; i++) {
-        for (int j = 0; j < N; j++) {
-            double sum = 0;
-            for (int k = 0; k < K; k++) {
-                sum += get({i, k}) * r.get({k, j});
-            }
-            result.set({i, j}, sum);
-        }
-    }
+
+    const int M = shape[0];
+    const int K = shape[1];
+    const int N = r.shape[1];
+
+    NDArray result({M, N});
+
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.0,
+                data.data(), K, r.data.data(), N, 0.0, result.data.data(), N);
+
     return result;
 }
-
 NDArray NDArray::sum(int axis, bool keepdims) {
     if (axis < 0 || axis >= shape.size()) {
         throw out_of_range("axis out of bounds");
@@ -264,13 +265,17 @@ NDArray NDArray::elementwise_broadcast(
 }
 NDArray NDArray::slice(int row_start, int row_end) const {
     int rows = row_end - row_start;
-    NDArray out({rows, shape[1]});  // keep same number of columns
-#pragma omp parallel for
-    for (int i = 0; i < rows; i++) {
-        for (int j = 0; j < shape[1]; j++) {
-            out.set({i, j}, this->get({row_start + i, j}));
-        }
-    }
+    int cols = shape[1];
+    int start = row_start * stride[0];
+    int count = rows * cols;
+
+    NDArray out;
+    out.owned = owned;
+    out.data = data.subspan(start, count);
+    out.shape = {rows, cols};
+    out.ndim = 2;
+    out.numel = count;
+    out.compute_strides();
     return out;
 }
 

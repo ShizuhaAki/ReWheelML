@@ -5,13 +5,13 @@ project(lab1
     LANGUAGES CXX
 )
 
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_FLAGS "-fopenmp -O2 -Wall -g")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# === Project sources ===
 file(GLOB_RECURSE LIB_SOURCES
     "${PROJECT_SOURCE_DIR}/lib/*.c"
     "${PROJECT_SOURCE_DIR}/lib/*.cpp"
@@ -29,7 +29,7 @@ file(GLOB_RECURSE HEADERS
 set(PROJECT_SOURCES
     ${LIB_SOURCES}
     ${SRC_SOURCES}
-    ${HEADERS}  # optional
+    ${HEADERS}
 )
 
 # Main executable
@@ -40,13 +40,15 @@ target_include_directories(${PROJECT_NAME}
         ${PROJECT_SOURCE_DIR}/include
 )
 
-# === Tests ===
+find_package(BLAS REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE BLAS::BLAS)
+
+
 # Discover all test source files under ./tests
 file(GLOB_RECURSE TEST_SOURCES
     "${PROJECT_SOURCE_DIR}/tests/*.cpp"
 )
 
-# Combine test sources with library sources (so tests can use the implementation)
 add_executable(all_tests ${TEST_SOURCES} ${LIB_SOURCES})
 
 target_include_directories(all_tests
@@ -54,3 +56,5 @@ target_include_directories(all_tests
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_SOURCE_DIR}/include/vendor  # for doctest.hpp
 )
+
+target_link_libraries(all_tests PRIVATE BLAS::BLAS)
