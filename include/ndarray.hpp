@@ -10,8 +10,8 @@ enum class InitType { Xavier, Kaiming, Uniform, Normal };
 
 class NDArray {
    private:
-    shared_ptr<vector<double>> owned;
-    span<double> data;
+    shared_ptr<vector<float>> owned;
+    span<float> data;
 
     void compute_strides();
     bool check_same_shape(const NDArray& r) const;
@@ -25,22 +25,22 @@ class NDArray {
     NDArray(const vector<int>& shape_list);
     NDArray();
 
-    double get(const vector<int>& index) const;
-    void set(const vector<int>& index, double value);
+    float get(const vector<int>& index) const;
+    void set(const vector<int>& index, float value);
     void reshape(const vector<int>& shape_list);
-    void fill(double value);
-    NDArray for_each_element(function<double(double)> fn) const;
-    NDArray for_each_element_indexed(function<double(double, int)> fn) const;
-    NDArray operator+(const double s) const;
-    NDArray operator-(const double s) const;
-    NDArray operator*(const double s) const;
-    NDArray operator/(const double s) const;
+    void fill(float value);
+    NDArray for_each_element(function<float(float)> fn) const;
+    NDArray for_each_element_indexed(function<float(float, int)> fn) const;
+    NDArray operator+(const float s) const;
+    NDArray operator-(const float s) const;
+    NDArray operator*(const float s) const;
+    NDArray operator/(const float s) const;
     NDArray operator+(const NDArray& r) const;
     NDArray operator-(const NDArray& r) const;
     NDArray operator*(const NDArray& r) const;
     NDArray operator/(const NDArray& r) const;
-    double& operator[](int offset);
-    const double& operator[](int offset) const;
+    float& operator[](int offset);
+    const float& operator[](int offset) const;
     NDArray matmul(const NDArray& r) const;
     NDArray sum(int axis, bool keepdims);
     NDArray transpose2d();
@@ -49,7 +49,7 @@ class NDArray {
 
     vector<int> broadcast_shape(const NDArray& r) const;
     NDArray elementwise_broadcast(const NDArray& r,
-                                  function<double(double, double)> fn) const;
+                                  function<float(float, float)> fn) const;
 
     // Add this method to NDArray
     NDArray slice(int row_start, int row_end) const;

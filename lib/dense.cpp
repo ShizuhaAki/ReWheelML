@@ -41,7 +41,7 @@ NDArray Dense::backward(const NDArray& dY) {
     return dX;
 }
 
-void Dense::step(double lr) {
+void Dense::step(float lr) {
     W = W - dW * lr;
     b = b - db * lr;
 }

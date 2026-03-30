@@ -15,5 +15,5 @@ class Dense : public Module {
     Dense(int input_dim, int output_dim, string activation = "sigmoid");
     NDArray forward(const NDArray& x);
     NDArray backward(const NDArray& dY);
-    void step(double lr);
+    void step(float lr);
 };

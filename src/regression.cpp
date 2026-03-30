@@ -14,12 +14,11 @@
 #include "ndarray.hpp"
 #include "vendor/inih.hpp"
 
-
 using namespace std;
 
 random_device rd;
 mt19937 mt(rd());
-uniform_real_distribution<double> dist(-numbers::pi, +numbers::pi);
+uniform_real_distribution<float> dist(-numbers::pi, +numbers::pi);
 
 void make_dataset(int cnt, NDArray& X, NDArray& Y) {
     X = NDArray({cnt, 1});
@@ -60,7 +59,7 @@ class SinePredictor : public Module {
         }
         return grad_out;
     }
-    void step(double lr) {
+    void step(float lr) {
         for (auto& l : layers) {
             l->step(lr);
         }
@@ -68,7 +67,7 @@ class SinePredictor : public Module {
 };
 
 int main(int argc, char** argv) {
-    feenableexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW);
+    //feenableexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW);
     // load configuration
     INIReader ini(argv[1]);
     if (ini.ParseError() != 0) {
@@ -95,18 +94,16 @@ int main(int argc, char** argv) {
 
     for (int i = 1; i <= epoches; i++) {
         cout << format("Epoch {}/{}: ", i, epoches);
-        double epoch_loss = 0.0;
+        float epoch_loss = 0.0;
 
         for (int start = 0; start < train_samples; start += batch_size) {
             int end = min(start + batch_size, train_samples);
-            auto batch_x =
-                train_x.slice(start, end);
+            auto batch_x = train_x.slice(start, end);
             auto batch_y = train_y.slice(start, end);
 
             auto pred = model.forward(batch_x);
             auto loss = mean_squared_error(pred, batch_y).mean(0, false);
-            epoch_loss +=
-                loss[0] * (end - start);
+            epoch_loss += loss[0] * (end - start);
 
             auto grad = (pred - batch_y) * 2 / (end - start);
             model.backward(grad);
@@ -127,8 +124,7 @@ int main(int argc, char** argv) {
         std::ofstream fout(fname);
         int points = 200;
         for (int i = 0; i <= points; i++) {
-            double x_val =
-                -numbers::pi + i * 2 * numbers::pi / points;
+            float x_val = -numbers::pi + i * 2 * numbers::pi / points;
             NDArray x({1, 1});
             x.set({0, 0}, x_val);
             NDArray y_pred = model.forward(x);

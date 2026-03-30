@@ -1,25 +1,26 @@
 #include "ndarray.hpp"
 
+#include <cblas.h>
+
 #include <format>
 #include <functional>
 #include <numeric>
 #include <random>
 #include <sstream>
 #include <stdexcept>
-#include <cblas.h>
 
 NDArray::NDArray(const vector<int>& shape_list) {
     shape = shape_list;
     ndim = shape_list.size();
     numel = reduce(shape.begin(), shape.end(), 1, multiplies<int>());
 
-    owned = make_shared<vector<double>>(numel);
-    data = span<double>(*owned);
+    owned = make_shared<vector<float>>(numel);
+    data = span<float>(*owned);
 
     compute_strides();
 }
 
-NDArray::NDArray() : owned(make_shared<vector<double>>()), data(*owned) {}
+NDArray::NDArray() : owned(make_shared<vector<float>>()), data(*owned) {}
 
 void NDArray::compute_strides() {
     stride.resize(ndim);
@@ -44,7 +45,7 @@ bool NDArray::check_same_shape(const NDArray& other) const {
     return shape == other.shape;
 }
 
-void NDArray::fill(double value) {
+void NDArray::fill(float value) {
     for (int i = 0; i < numel; i++) {
         data[i] = value;
     }
@@ -61,15 +62,15 @@ void NDArray::reshape(const vector<int>& shape_list) {
     this->compute_strides();
 }
 
-double NDArray::get(const vector<int>& index) const {
+float NDArray::get(const vector<int>& index) const {
     return data[offset(index)];
 }
 
-void NDArray::set(const vector<int>& index, double value) {
+void NDArray::set(const vector<int>& index, float value) {
     data[offset(index)] = value;
 }
 
-NDArray NDArray::for_each_element(function<double(double)> fn) const {
+NDArray NDArray::for_each_element(function<float(float)> fn) const {
     auto result = NDArray(shape);
 #pragma omp parallel for
     for (int i = 0; i < numel; i++) {
@@ -79,7 +80,7 @@ NDArray NDArray::for_each_element(function<double(double)> fn) const {
 }
 
 NDArray NDArray::for_each_element_indexed(
-    function<double(double, int)> fn) const {
+    function<float(float, int)> fn) const {
     auto result = NDArray(shape);
 #pragma omp parallel for
     for (int i = 0; i < numel; i++) {
@@ -88,36 +89,36 @@ NDArray NDArray::for_each_element_indexed(
     return result;
 }
 
-NDArray NDArray::operator+(const double s) const {
-    return for_each_element([=](double x) { return x + s; });
+NDArray NDArray::operator+(const float s) const {
+    return for_each_element([=](float x) { return x + s; });
 }
 
-NDArray NDArray::operator-(const double s) const {
-    return for_each_element([=](double x) { return x - s; });
+NDArray NDArray::operator-(const float s) const {
+    return for_each_element([=](float x) { return x - s; });
 }
 
-NDArray NDArray::operator*(const double s) const {
-    return for_each_element([=](double x) { return x * s; });
+NDArray NDArray::operator*(const float s) const {
+    return for_each_element([=](float x) { return x * s; });
 }
 
-NDArray NDArray::operator/(const double s) const {
-    return for_each_element([=](double x) { return x / s; });
+NDArray NDArray::operator/(const float s) const {
+    return for_each_element([=](float x) { return x / s; });
 }
 
 NDArray NDArray::operator+(const NDArray& r) const {
-    return elementwise_broadcast(r, [](double a, double b) { return a + b; });
+    return elementwise_broadcast(r, [](float a, float b) { return a + b; });
 }
 
 NDArray NDArray::operator-(const NDArray& r) const {
-    return elementwise_broadcast(r, [](double a, double b) { return a - b; });
+    return elementwise_broadcast(r, [](float a, float b) { return a - b; });
 }
 
 NDArray NDArray::operator*(const NDArray& r) const {
-    return elementwise_broadcast(r, [](double a, double b) { return a * b; });
+    return elementwise_broadcast(r, [](float a, float b) { return a * b; });
 }
 
 NDArray NDArray::operator/(const NDArray& r) const {
-    return elementwise_broadcast(r, [](double a, double b) { return a / b; });
+    return elementwise_broadcast(r, [](float a, float b) { return a / b; });
 }
 
 NDArray NDArray::matmul(const NDArray& r) const {
@@ -135,7 +136,7 @@ NDArray NDArray::matmul(const NDArray& r) const {
 
     NDArray result({M, N});
 
-    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.0,
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, M, N, K, 1.0,
                 data.data(), K, r.data.data(), N, 0.0, result.data.data(), N);
 
     return result;
@@ -178,9 +179,9 @@ NDArray NDArray::sum(int axis, bool keepdims) {
     return result;
 }
 
-const double& NDArray::operator[](int offset) const { return data[offset]; }
+const float& NDArray::operator[](int offset) const { return data[offset]; }
 
-double& NDArray::operator[](int offset) { return data[offset]; }
+float& NDArray::operator[](int offset) { return data[offset]; }
 
 NDArray NDArray::transpose2d() {
     if (ndim != 2) {
@@ -202,9 +203,9 @@ NDArray NDArray::mean(int axis, bool keepdims) {
     }
 
     NDArray s = sum(axis, keepdims);
-    double divisor = static_cast<double>(shape[axis]);
+    float divisor = static_cast<float>(shape[axis]);
 
-    return s / divisor;  // uses operator/(double) defined earlier
+    return s / divisor;  // uses operator/(float) defined earlier
 }
 
 string NDArray::shape_str() const {
@@ -234,8 +235,8 @@ std::vector<int> NDArray::broadcast_shape(const NDArray& r) const {
 
     return result_shape;
 }
-NDArray NDArray::elementwise_broadcast(
-    const NDArray& r, function<double(double, double)> fn) const {
+NDArray NDArray::elementwise_broadcast(const NDArray& r,
+                                       function<float(float, float)> fn) const {
     vector<int> result_shape = broadcast_shape(r);
     NDArray result(result_shape);
 
@@ -285,7 +286,7 @@ void NDArray::init_weights(InitType type) {
     std::random_device rd;
     std::mt19937 gen(rd());
 
-    double scale = 1.0;
+    float scale = 1.0;
 
     if (ndim < 2)
         throw std::runtime_error(
@@ -309,8 +310,8 @@ void NDArray::init_weights(InitType type) {
             break;
     }
 
-    std::uniform_real_distribution<double> uni_dist(-scale, scale);
-    std::normal_distribution<double> norm_dist(0.0, scale);
+    std::uniform_real_distribution<float> uni_dist(-scale, scale);
+    std::normal_distribution<float> norm_dist(0.0, scale);
 
     for (int i = 0; i < numel; ++i) {
         if (type == InitType::Normal || type == InitType::Kaiming ||
