@@ -8,11 +8,14 @@
 #include <random>
 #include <ranges>
 
-#include "dense.hpp"
 #include "functional.hpp"
-#include "module.hpp"
+#include "module/dense.hpp"
+#include "module/module.hpp"
 #include "ndarray.hpp"
+#include "optim/adam.hpp"
+#include "optim/optim.hpp"
 #include "vendor/inih.hpp"
+
 
 using namespace std;
 
@@ -36,14 +39,16 @@ class SinePredictor : public Module {
 
    public:
     SinePredictor(int hidden_size, int n_hidden_layers, string activation) {
-        layers.push_back(std::make_unique<Dense>(1, hidden_size, activation));
+        layers.push_back(std::make_unique<Linear>(1, hidden_size));
+        layers.push_back(std::make_unique<Activation>(activation));
         if (n_hidden_layers > 1) {
             for (int i = 0; i < n_hidden_layers - 1; i++) {
-                layers.push_back(std::make_unique<Dense>(
-                    hidden_size, hidden_size, activation));
+                layers.push_back(
+                    std::make_unique<Linear>(hidden_size, hidden_size));
+                layers.push_back(std::make_unique<Activation>(activation));
             }
         }
-        layers.push_back(std::make_unique<Dense>(hidden_size, 1, "linear"));
+        layers.push_back(std::make_unique<Linear>(hidden_size, 1));
     }
     NDArray forward(const NDArray& x) {
         auto out = x;
@@ -64,14 +69,23 @@ class SinePredictor : public Module {
             l->step(lr);
         }
     }
+
+    std::vector<Parameter> parameters() override {
+        std::vector<Parameter> result;
+        for (auto& layer : layers) {
+            auto layer_params = layer->parameters();
+            result.insert(result.end(), layer_params.begin(), layer_params.end());
+        }
+        return result;
+    }
 };
 
 int main(int argc, char** argv) {
-    //feenableexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW);
-    // load configuration
+    // feenableexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW);
+    //  load configuration
     INIReader ini(argv[1]);
     if (ini.ParseError() != 0) {
-        cerr << "failed to parse model.ini" << endl;
+        cerr << "failed to parse INI configuration" << endl;
         return 0;
     }
 
@@ -89,8 +103,21 @@ int main(int argc, char** argv) {
     SinePredictor model(hidden_size, n_hidden_layers, activation);
     auto lr = ini.GetFloat("train", "lr", 0.01);
     auto epoches = ini.GetInteger("train", "epoches", 20);
+    string optimizer_name = ini.Get("train", "optimizer", "sgd");
+    float beta1 = ini.GetFloat("train", "beta1", 0.9f);
+    float beta2 = ini.GetFloat("train", "beta2", 0.999f);
+    float eps = ini.GetFloat("train", "eps", 1e-8f);
 
     int batch_size = ini.GetInteger("train", "batch_size", 16);
+    unique_ptr<Optimizer> optimizer;
+    if (optimizer_name == "sgd") {
+        optimizer = make_unique<SGD>(model.parameters(), lr);
+    } else if (optimizer_name == "adam") {
+        optimizer = make_unique<Adam>(model.parameters(), lr, beta1, beta2, eps);
+    } else {
+        cerr << "unknown optimizer: " << optimizer_name << endl;
+        return 1;
+    }
 
     for (int i = 1; i <= epoches; i++) {
         cout << format("Epoch {}/{}: ", i, epoches);
@@ -102,19 +129,20 @@ int main(int argc, char** argv) {
             auto batch_y = train_y.slice(start, end);
 
             auto pred = model.forward(batch_x);
-            auto loss = mean_squared_error(pred, batch_y).mean(0, false);
+            auto loss = squared_error(pred, batch_y).mean(0, false);
             epoch_loss += loss[0] * (end - start);
 
             auto grad = (pred - batch_y) * 2 / (end - start);
             model.backward(grad);
-            model.step(lr);
+            optimizer->step();
+            optimizer->zero_grad();
         }
 
         cout << "loss: " << (epoch_loss / train_samples) << endl;
 
         cout << "Evaluating on validation set...";
         auto eval_pred = model.forward(eval_x);
-        auto eval_loss = mean_squared_error(eval_pred, eval_y).mean(0, false);
+        auto eval_loss = squared_error(eval_pred, eval_y).mean(0, false);
         cout << "Evaluation loss: " << eval_loss[0] << endl;
 
         cout << "Example predictions:\n";

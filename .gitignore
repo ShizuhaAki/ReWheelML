@@ -84,3 +84,8 @@ include/vendor/**
 
 # plotting 
 plot.py
+
+.codex
+
+data/**
+checkpoint/**

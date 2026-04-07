@@ -18,30 +18,35 @@ file(GLOB_RECURSE LIB_SOURCES
     "${PROJECT_SOURCE_DIR}/lib/*.pp"
 )
 
-file(GLOB_RECURSE SRC_SOURCES
-    "${PROJECT_SOURCE_DIR}/src/*.cpp"
-)
-
 file(GLOB_RECURSE HEADERS
     "${PROJECT_SOURCE_DIR}/include/*.hpp"
 )
 
-set(PROJECT_SOURCES
+set(COMMON_SOURCES
     ${LIB_SOURCES}
-    ${SRC_SOURCES}
     ${HEADERS}
 )
 
-# Main executable
-add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
+add_library(${PROJECT_NAME}_core ${COMMON_SOURCES})
 
-target_include_directories(${PROJECT_NAME}
+target_include_directories(${PROJECT_NAME}_core
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
 )
 
 find_package(BLAS REQUIRED)
-target_link_libraries(${PROJECT_NAME} PRIVATE BLAS::BLAS)
+target_link_libraries(${PROJECT_NAME}_core PRIVATE BLAS::BLAS)
+
+add_executable(regression src/regression.cpp)
+target_include_directories(regression PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(regression PRIVATE ${PROJECT_NAME}_core BLAS::BLAS)
+
+add_executable(classification src/classification.cpp)
+target_include_directories(classification PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(classification PRIVATE ${PROJECT_NAME}_core BLAS::BLAS)
+
+add_executable(split_dataset src/split_dataset.cpp)
+target_include_directories(split_dataset PRIVATE ${PROJECT_SOURCE_DIR}/include)
 
 
 # Discover all test source files under ./tests
@@ -49,7 +54,7 @@ file(GLOB_RECURSE TEST_SOURCES
     "${PROJECT_SOURCE_DIR}/tests/*.cpp"
 )
 
-add_executable(all_tests ${TEST_SOURCES} ${LIB_SOURCES})
+add_executable(all_tests ${TEST_SOURCES})
 
 target_include_directories(all_tests
     PRIVATE
@@ -57,4 +62,4 @@ target_include_directories(all_tests
         ${PROJECT_SOURCE_DIR}/include/vendor  # for doctest.hpp
 )
 
-target_link_libraries(all_tests PRIVATE BLAS::BLAS)
+target_link_libraries(all_tests PRIVATE ${PROJECT_NAME}_core BLAS::BLAS)
