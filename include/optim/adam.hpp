@@ -43,6 +43,9 @@ class Adam : public Optimizer {
         for (int i = 0; i < static_cast<int>(params.size()); ++i) {
             auto* value = params[i].value;
             auto* grad = params[i].grad;
+            if (grad == nullptr) {
+                continue;
+            }
             for (int j = 0; j < value->numel; ++j) {
                 float g = (*grad)[j];
                 m[i][j] = beta1 * m[i][j] + (1.0f - beta1) * g;
@@ -54,4 +57,8 @@ class Adam : public Optimizer {
             }
         }
     }
+
+    float get_lr() const override { return lr; }
+
+    void set_lr(float new_lr) override { lr = new_lr; }
 };

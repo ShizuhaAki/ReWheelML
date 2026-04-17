@@ -6,7 +6,7 @@
 
 struct Parameter {
     NDArray* value;
-    NDArray* grad;
+    NDArray* grad = nullptr;
 };
 
 class Module {

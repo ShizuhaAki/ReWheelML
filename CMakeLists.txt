@@ -8,7 +8,7 @@ project(lab1
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "-fopenmp -O3 -march=native -Wall -g")
+set(CMAKE_CXX_FLAGS "-fopenmp -O3 -march=native -Wall -g -DNDEBUG")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -44,6 +44,10 @@ target_link_libraries(regression PRIVATE ${PROJECT_NAME}_core BLAS::BLAS)
 add_executable(classification src/classification.cpp)
 target_include_directories(classification PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(classification PRIVATE ${PROJECT_NAME}_core BLAS::BLAS)
+
+add_executable(cnn src/cnn.cpp)
+target_include_directories(cnn PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(cnn PRIVATE ${PROJECT_NAME}_core BLAS::BLAS)
 
 add_executable(split_dataset src/split_dataset.cpp)
 target_include_directories(split_dataset PRIVATE ${PROJECT_SOURCE_DIR}/include)

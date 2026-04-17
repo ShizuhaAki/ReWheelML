@@ -1,11 +1,13 @@
 #include <algorithm>
-#include <filesystem>
+#include <cstdio>
 #include <format>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <numeric>
 #include <random>
 #include <ranges>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -22,14 +24,74 @@
 
 using namespace std;
 
-NDArray one_hot(const vector<int>& labels, int num_classes) {
-    NDArray encoded({static_cast<int>(labels.size()), num_classes});
-    encoded.fill(0.0f);
-    for (int i = 0; i < static_cast<int>(labels.size()); ++i) {
-        encoded.set({i, labels[i] - 1}, 1.0f);
+namespace {
+constexpr int kInputDim = 28 * 28;
+constexpr const char* kDefaultConfigPath = "model.ini";
+constexpr const char* kDefaultCheckpointPath =
+    "checkpoints/best_classification.ckpt";
+
+string read_text_file(const string& path) {
+    ifstream in(path);
+    if (!in) {
+        throw runtime_error("failed to open file: " + path);
     }
-    return encoded;
+    return string((istreambuf_iterator<char>(in)), istreambuf_iterator<char>());
 }
+
+INIReader load_ini_from_string(const string& config_text) {
+    FILE* file = tmpfile();
+    if (file == nullptr) {
+        throw runtime_error("failed to create temporary file for INI parsing");
+    }
+
+    size_t written = fwrite(config_text.data(), 1, config_text.size(), file);
+    if (written != config_text.size()) {
+        fclose(file);
+        throw runtime_error("failed to write temporary INI data");
+    }
+    rewind(file);
+
+    INIReader ini(file);
+    fclose(file);
+    return ini;
+}
+
+struct InferenceOptions {
+    string checkpoint_path = kDefaultCheckpointPath;
+    string image_path;
+    string dir_path;
+};
+
+InferenceOptions parse_inference_args(int argc, char** argv) {
+    InferenceOptions options;
+    for (int i = 2; i < argc; ++i) {
+        string arg = argv[i];
+        if (arg == "--checkpoint") {
+            if (i + 1 >= argc) {
+                throw invalid_argument("missing value for --checkpoint");
+            }
+            options.checkpoint_path = argv[++i];
+        } else if (arg == "--image") {
+            if (i + 1 >= argc) {
+                throw invalid_argument("missing value for --image");
+            }
+            options.image_path = argv[++i];
+        } else if (arg == "--dir") {
+            if (i + 1 >= argc) {
+                throw invalid_argument("missing value for --dir");
+            }
+            options.dir_path = argv[++i];
+        } else if (arg.starts_with("--")) {
+            throw invalid_argument("unknown inference flag: " + arg);
+        } else if (options.checkpoint_path == kDefaultCheckpointPath) {
+            options.checkpoint_path = arg;
+        } else {
+            throw invalid_argument("unexpected positional argument: " + arg);
+        }
+    }
+    return options;
+}
+}  // namespace
 
 vector<int> slice_labels(const vector<int>& labels, int start, int end) {
     return vector<int>(labels.begin() + start, labels.begin() + end);
@@ -56,19 +118,6 @@ ImageDataset shuffle_dataset(const ImageDataset& dataset, mt19937& rng) {
     return shuffled;
 }
 
-int argmax_row(const NDArray& x, int row) {
-    int best = 0;
-    float best_value = x.get({row, 0});
-    for (int j = 1; j < x.shape[1]; ++j) {
-        float value = x.get({row, j});
-        if (value > best_value) {
-            best_value = value;
-            best = j;
-        }
-    }
-    return best;
-}
-
 float accuracy(const NDArray& logits, const vector<int>& labels) {
     int correct = 0;
     for (int i = 0; i < logits.shape[0]; ++i) {
@@ -77,6 +126,14 @@ float accuracy(const NDArray& logits, const vector<int>& labels) {
     return labels.empty() ? 0.0f
                           : static_cast<float>(correct) /
                                 static_cast<float>(labels.size());
+}
+
+float max_probability(const NDArray& probs, int row) {
+    float best = probs.get({row, 0});
+    for (int j = 1; j < probs.shape[1]; ++j) {
+        best = max(best, probs.get({row, j}));
+    }
+    return best;
 }
 
 class DigitClassifier : public Module {
@@ -140,14 +197,105 @@ class DigitClassifier : public Module {
         vector<Parameter> result;
         for (auto& layer : layers) {
             auto layer_params = layer->parameters();
-            result.insert(result.end(), layer_params.begin(), layer_params.end());
+            result.insert(result.end(), layer_params.begin(),
+                          layer_params.end());
         }
         return result;
     }
 };
 
 int main(int argc, char** argv) {
-    string config_path = argc > 1 ? argv[1] : "model.ini";
+    bool inference_mode = argc > 1 && string(argv[1]) == "--inference";
+    if (inference_mode) {
+        try {
+            auto options = parse_inference_args(argc, argv);
+
+            CheckpointMetadata metadata;
+            if (!load_checkpoint_metadata(options.checkpoint_path, &metadata)) {
+                cerr << "failed to load checkpoint metadata: "
+                     << options.checkpoint_path << endl;
+                return 1;
+            }
+            if (metadata.config_text.empty()) {
+                cerr << "checkpoint does not contain embedded INI: "
+                     << options.checkpoint_path << endl;
+                return 1;
+            }
+
+            auto ini = load_ini_from_string(metadata.config_text);
+            if (ini.ParseError() != 0) {
+                cerr << "failed to parse embedded INI from checkpoint" << endl;
+                return 1;
+            }
+
+            bool invert = ini.GetBoolean("data", "invert", false);
+            int num_classes = ini.GetInteger("model", "num_classes", 10);
+            int hidden_size = ini.GetInteger("model", "hidden_size", 128);
+            int hidden_layers = ini.GetInteger("model", "hidden_layers", 2);
+            string activation = ini.Get("model", "activation", "relu");
+            int seed = ini.GetInteger("train", "seed", 42);
+            float dropout_p = ini.GetFloat("model", "dropout", 0.0f);
+            string inference_dir = options.dir_path.empty()
+                                       ? ini.Get("data", "eval_dir", "data/test")
+                                       : options.dir_path;
+
+            DigitClassifier model(kInputDim, hidden_size, hidden_layers,
+                                  num_classes, activation, dropout_p, seed);
+            if (!load_checkpoint(options.checkpoint_path, model.parameters())) {
+                cerr << "failed to load checkpoint weights: "
+                     << options.checkpoint_path << endl;
+                return 1;
+            }
+
+            model.eval();
+            cout << format("Loaded checkpoint {} (epoch {}, {} = {:.6f})",
+                           options.checkpoint_path, metadata.epoch,
+                           metadata.metric_name, metadata.metric_value)
+                 << endl;
+
+            if (!options.image_path.empty()) {
+                auto image = load_bmp_28x28_flat(options.image_path, invert);
+                auto logits = model.forward(image);
+                auto probs = softmax(logits);
+                int pred = argmax_row(logits, 0) + 1;
+                cout << format("Prediction for {}: class {}, confidence {:.4f}",
+                               options.image_path, pred,
+                               max_probability(probs, 0))
+                     << endl;
+                return 0;
+            }
+
+            cout << "Loading inference dataset from " << inference_dir << "..."
+                 << endl;
+            auto inference_data = load_bmp_dataset(inference_dir, invert);
+            if (inference_data.y.empty()) {
+                cerr << "inference dataset is empty" << endl;
+                return 1;
+            }
+
+            auto logits = model.forward(inference_data.X);
+            auto probs = softmax(logits);
+            auto targets = one_hot(inference_data.y, num_classes);
+            cout << format("Inference loss: {:.6f}, accuracy: {:.4f}",
+                           cross_entropy(probs, targets),
+                           accuracy(logits, inference_data.y))
+                 << endl;
+            return 0;
+        } catch (const exception& e) {
+            cerr << e.what() << endl;
+            return 1;
+        }
+    }
+
+    string config_path = argc > 1 ? argv[1] : kDefaultConfigPath;
+    string config_text;
+    try {
+        config_text = read_text_file(config_path);
+    } catch (const exception& e) {
+        cerr << e.what() << endl;
+        return 1;
+    }
+
     INIReader ini(config_path);
     if (ini.ParseError() != 0) {
         cerr << "failed to parse " << config_path << endl;
@@ -157,21 +305,6 @@ int main(int argc, char** argv) {
     string train_dir = ini.Get("data", "train_dir", "data/train");
     string eval_dir = ini.Get("data", "eval_dir", "data/test");
     bool invert = ini.GetBoolean("data", "invert", false);
-
-    cout << "Loading training images from " << train_dir << "..." << endl;
-    auto train = load_bmp_dataset(train_dir, invert);
-    cout << "Loaded " << train.y.size() << " training samples" << endl;
-
-    cout << "Loading evaluation images from " << eval_dir << "..." << endl;
-    auto eval = load_bmp_dataset(eval_dir, invert);
-    cout << "Loaded " << eval.y.size() << " evaluation samples" << endl;
-
-    if (train.y.empty() || eval.y.empty()) {
-        cerr << "dataset is empty" << endl;
-        return 1;
-    }
-
-    int input_dim = train.X.shape[1];
     int num_classes = ini.GetInteger("model", "num_classes", 10);
     int hidden_size = ini.GetInteger("model", "hidden_size", 128);
     int hidden_layers = ini.GetInteger("model", "hidden_layers", 2);
@@ -186,26 +319,42 @@ int main(int argc, char** argv) {
     float beta2 = ini.GetFloat("train", "beta2", 0.999f);
     float eps = ini.GetFloat("train", "eps", 1e-8f);
     AugmentConfig augment_config{
-        .max_shift = static_cast<int>(ini.GetInteger("augment", "max_shift", 0)),
+        .max_shift =
+            static_cast<int>(ini.GetInteger("augment", "max_shift", 0)),
+        .max_rotation_deg = ini.GetFloat("augment", "max_rotation_deg", 0.0f),
+        .morphology_prob = ini.GetFloat("augment", "morphology_prob", 0.0f),
         .noise_std = ini.GetFloat("augment", "noise_std", 0.0f),
     };
     bool checkpoint_enabled = ini.GetBoolean("checkpoint", "enabled", false);
     string checkpoint_path =
-        ini.Get("checkpoint", "path", "checkpoints/best_classification.ckpt");
+        ini.Get("checkpoint", "path", kDefaultCheckpointPath);
     string checkpoint_metric = ini.Get("checkpoint", "metric", "eval_loss");
     string checkpoint_mode = ini.Get("checkpoint", "mode", "min");
 
     mt19937 rng(seed);
-
-    DigitClassifier model(input_dim, hidden_size, hidden_layers, num_classes,
+    DigitClassifier model(kInputDim, hidden_size, hidden_layers, num_classes,
                           activation, dropout_p, seed);
     unique_ptr<Optimizer> optimizer;
     if (optimizer_name == "sgd") {
         optimizer = make_unique<SGD>(model.parameters(), lr);
     } else if (optimizer_name == "adam") {
-        optimizer = make_unique<Adam>(model.parameters(), lr, beta1, beta2, eps);
+        optimizer =
+            make_unique<Adam>(model.parameters(), lr, beta1, beta2, eps);
     } else {
         cerr << "unknown optimizer: " << optimizer_name << endl;
+        return 1;
+    }
+
+    cout << "Loading training images from " << train_dir << "..." << endl;
+    auto train = load_bmp_dataset(train_dir, invert);
+    cout << "Loaded " << train.y.size() << " training samples" << endl;
+
+    cout << "Loading evaluation images from " << eval_dir << "..." << endl;
+    auto eval = load_bmp_dataset(eval_dir, invert);
+    cout << "Loaded " << eval.y.size() << " evaluation samples" << endl;
+
+    if (train.y.empty() || eval.y.empty()) {
+        cerr << "dataset is empty" << endl;
         return 1;
     }
 
@@ -213,7 +362,8 @@ int main(int argc, char** argv) {
         float epoch_loss = 0.0f;
         int seen = 0;
         auto shuffled_train = shuffle_dataset(train, rng);
-        auto augmented_train = augment_dataset(shuffled_train, augment_config, rng);
+        auto augmented_train =
+            augment_dataset(shuffled_train, augment_config, rng);
         model.train();
 
         for (int start = 0; start < augmented_train.X.shape[0];
@@ -256,13 +406,13 @@ int main(int argc, char** argv) {
             static bool has_best = false;
             static float best_metric = 0.0f;
 
-            bool improved =
-                !has_best ||
-                (checkpoint_mode == "max" ? current_metric > best_metric
-                                           : current_metric < best_metric);
+            bool improved = !has_best || (checkpoint_mode == "max"
+                                              ? current_metric > best_metric
+                                              : current_metric < best_metric);
             if (improved) {
                 save_checkpoint(checkpoint_path, model.parameters(), epoch,
-                                current_metric, checkpoint_metric);
+                                current_metric, checkpoint_metric,
+                                config_text);
                 best_metric = current_metric;
                 has_best = true;
                 cout << format("Saved checkpoint: {} ({})", checkpoint_path,

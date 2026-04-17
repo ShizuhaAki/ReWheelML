@@ -13,6 +13,8 @@ struct ImageDataset {
 
 struct AugmentConfig {
     int max_shift = 0;
+    float max_rotation_deg = 0.0f;
+    float morphology_prob = 0.0f;
     float noise_std = 0.0f;
 };
 

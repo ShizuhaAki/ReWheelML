@@ -9,7 +9,12 @@ TEST_CASE("Image augmentation preserves shape and labels") {
     dataset.X.set({0, 14 * 28 + 14}, 1.0f);
     dataset.X.set({1, 10 * 28 + 10}, 1.0f);
 
-    AugmentConfig config{.max_shift = 2, .noise_std = 0.0f};
+    AugmentConfig config{
+        .max_shift = 2,
+        .max_rotation_deg = 5.0f,
+        .morphology_prob = 1.0f,
+        .noise_std = 0.0f,
+    };
     std::mt19937 rng(42);
     auto augmented = augment_dataset(dataset, config, rng);
 
@@ -35,4 +40,27 @@ TEST_CASE("Zero augmentation returns original dataset") {
     for (int i = 0; i < dataset.X.numel; ++i) {
         CHECK(augmented.X[i] == doctest::Approx(dataset.X[i]));
     }
+}
+
+TEST_CASE("Morphology augmentation can expand a binary dot") {
+    NDArray image({1, 28 * 28});
+    image.fill(0.0f);
+    image.set({0, 14 * 28 + 14}, 1.0f);
+
+    AugmentConfig config{
+        .max_shift = 0,
+        .max_rotation_deg = 0.0f,
+        .morphology_prob = 1.0f,
+        .noise_std = 0.0f,
+    };
+    std::mt19937 rng(0);
+    auto augmented = augment_bmp_28x28_flat(image, config, rng);
+
+    float sum = 0.0f;
+    for (int i = 0; i < augmented.numel; ++i) {
+        sum += augmented[i];
+        CHECK(augmented[i] >= 0.0f);
+        CHECK(augmented[i] <= 1.0f);
+    }
+    CHECK(sum >= 1.0f);
 }

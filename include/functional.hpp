@@ -65,6 +65,19 @@ inline NDArray softmax(const NDArray& logits) {
     return probs;
 }
 
+inline int argmax_row(const NDArray& x, int row) {
+    int best = 0;
+    float best_value = x.get({row, 0});
+    for (int j = 1; j < x.shape[1]; ++j) {
+        float value = x.get({row, j});
+        if (value > best_value) {
+            best_value = value;
+            best = j;
+        }
+    }
+    return best;
+}
+
 inline float cross_entropy(const NDArray& probs, const NDArray& target) {
     const float eps = 1e-12f;
     int batch = probs.shape[0];
@@ -86,6 +99,15 @@ inline float cross_entropy(const NDArray& probs, const NDArray& target) {
 inline NDArray cross_entropy_grad(const NDArray& probs, const NDArray& target) {
     int batch = probs.shape[0];
     return (probs - target) / static_cast<float>(batch);
+}
+
+inline NDArray one_hot(const vector<int>& labels, int num_classes) {
+    NDArray encoded({static_cast<int>(labels.size()), num_classes});
+    encoded.fill(0.0f);
+    for (int i = 0; i < static_cast<int>(labels.size()); ++i) {
+        encoded.set({i, labels[i] - 1}, 1.0f);
+    }
+    return encoded;
 }
 
 // typedef goes to the bottom

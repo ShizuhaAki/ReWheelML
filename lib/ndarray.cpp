@@ -292,8 +292,13 @@ void NDArray::init_weights(InitType type) {
         throw std::runtime_error(
             "Weight initialization requires at least 2D tensor");
 
-    int fan_in = shape[1];
-    int fan_out = shape[0];
+    int receptive_field = 1;
+    for (int i = 2; i < ndim; ++i) {
+        receptive_field *= shape[i];
+    }
+
+    int fan_in = shape[1] * receptive_field;
+    int fan_out = shape[0] * receptive_field;
 
     switch (type) {
         case InitType::Xavier:

@@ -9,9 +9,9 @@
 using namespace std;
 namespace fs = std::filesystem;
 
-namespace {
-constexpr const char kMagic[] = "FDUAIH";
-constexpr size_t kMagicSize = 8;
+constexpr char kOldMagic[] = {'F', 'D', 'U', 'A', 'I', 'H', '\0', '\0'};
+constexpr char kNewMagic[] = {'F', 'D', 'U', 'A', 'I', '2', '\0', '\0'};
+constexpr size_t kMagicSize = sizeof(kNewMagic);
 
 template <typename T>
 void write_binary(ofstream& out, const T& value) {
@@ -24,10 +24,51 @@ void read_binary(ifstream& in, T& value) {
     in.read(reinterpret_cast<char*>(&value), sizeof(T));
     if (!in) throw runtime_error("failed to read checkpoint");
 }
-}  // namespace
+
+void write_string(ofstream& out, const string& value) {
+    int size = static_cast<int>(value.size());
+    write_binary(out, size);
+    out.write(value.data(), size);
+    if (!out) throw runtime_error("failed to write checkpoint string");
+}
+
+string read_string(ifstream& in) {
+    int size = 0;
+    read_binary(in, size);
+    if (size < 0) throw runtime_error("invalid checkpoint string length");
+
+    string value(size, '\0');
+    in.read(value.data(), size);
+    if (!in) throw runtime_error("failed to read checkpoint string");
+    return value;
+}
+
+bool read_header(ifstream& in, CheckpointMetadata* metadata, bool* has_config) {
+    char magic[kMagicSize];
+    in.read(magic, kMagicSize);
+    if (!in) return false;
+
+    const string actual_magic(magic, kMagicSize);
+    if (actual_magic != string(kOldMagic, kMagicSize) &&
+        actual_magic != string(kNewMagic, kMagicSize)) {
+        return false;
+    }
+
+    read_binary(in, metadata->epoch);
+    read_binary(in, metadata->metric_value);
+    metadata->metric_name = read_string(in);
+    *has_config = actual_magic == string(kNewMagic, kMagicSize);
+    if (*has_config) {
+        metadata->config_text = read_string(in);
+    } else {
+        metadata->config_text.clear();
+    }
+    return true;
+}
 
 void save_checkpoint(const string& path, const vector<Parameter>& params,
-                     int epoch, float metric_value, const string& metric_name) {
+                     int epoch, float metric_value, const string& metric_name,
+                     const string& config_text) {
     fs::path checkpoint_path(path);
     if (checkpoint_path.has_parent_path()) {
         fs::create_directories(checkpoint_path.parent_path());
@@ -38,13 +79,11 @@ void save_checkpoint(const string& path, const vector<Parameter>& params,
         throw runtime_error("failed to open checkpoint for writing: " + path);
     }
 
-    out.write(kMagic, kMagicSize);
+    out.write(kNewMagic, kMagicSize);
     write_binary(out, epoch);
     write_binary(out, metric_value);
-
-    int metric_name_size = static_cast<int>(metric_name.size());
-    write_binary(out, metric_name_size);
-    out.write(metric_name.data(), metric_name_size);
+    write_string(out, metric_name);
+    write_string(out, config_text);
 
     int param_count = static_cast<int>(params.size());
     write_binary(out, param_count);
@@ -62,26 +101,16 @@ void save_checkpoint(const string& path, const vector<Parameter>& params,
 }
 
 bool load_checkpoint(const string& path, const vector<Parameter>& params,
-                     int* epoch, float* metric_value, string* metric_name) {
+                     int* epoch, float* metric_value, string* metric_name,
+                     string* config_text) {
     ifstream in(path, ios::binary);
     if (!in) return false;
 
-    char magic[kMagicSize];
-    in.read(magic, kMagicSize);
-    if (!in || string(magic, kMagicSize) != string(kMagic, kMagicSize)) {
+    CheckpointMetadata metadata;
+    bool has_config = false;
+    if (!read_header(in, &metadata, &has_config)) {
         return false;
     }
-
-    int saved_epoch = 0;
-    float saved_metric_value = 0.0f;
-    int metric_name_size = 0;
-    read_binary(in, saved_epoch);
-    read_binary(in, saved_metric_value);
-    read_binary(in, metric_name_size);
-
-    string saved_metric_name(metric_name_size, '\0');
-    in.read(saved_metric_name.data(), metric_name_size);
-    if (!in) throw runtime_error("failed to read checkpoint metric name");
 
     int param_count = 0;
     read_binary(in, param_count);
@@ -108,8 +137,22 @@ bool load_checkpoint(const string& path, const vector<Parameter>& params,
         }
     }
 
-    if (epoch) *epoch = saved_epoch;
-    if (metric_value) *metric_value = saved_metric_value;
-    if (metric_name) *metric_name = saved_metric_name;
+    if (epoch) *epoch = metadata.epoch;
+    if (metric_value) *metric_value = metadata.metric_value;
+    if (metric_name) *metric_name = metadata.metric_name;
+    if (config_text) *config_text = metadata.config_text;
+    return true;
+}
+
+bool load_checkpoint_metadata(const string& path, CheckpointMetadata* metadata) {
+    if (metadata == nullptr) return false;
+
+    ifstream in(path, ios::binary);
+    if (!in) return false;
+
+    bool has_config = false;
+    if (!read_header(in, metadata, &has_config)) {
+        return false;
+    }
     return true;
 }

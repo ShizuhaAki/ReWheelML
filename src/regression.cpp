@@ -33,6 +33,15 @@ void make_dataset(int cnt, NDArray& X, NDArray& Y) {
     }
 }
 
+float mean_absolute_error(const NDArray& pred, const NDArray& target) {
+    auto diff = pred - target;
+    float total = 0.0f;
+    for (int i = 0; i < diff.numel; ++i) {
+        total += std::abs(diff[i]);
+    }
+    return total / static_cast<float>(diff.numel);
+}
+
 class SinePredictor : public Module {
    private:
     std::vector<std::unique_ptr<Module>> layers;
@@ -138,12 +147,17 @@ int main(int argc, char** argv) {
             optimizer->zero_grad();
         }
 
-        cout << "loss: " << (epoch_loss / train_samples) << endl;
+        auto train_pred = model.forward(train_x);
+        float train_mae = mean_absolute_error(train_pred, train_y);
+        cout << "loss: " << (epoch_loss / train_samples)
+             << ", MAE: " << train_mae << endl;
 
         cout << "Evaluating on validation set...";
         auto eval_pred = model.forward(eval_x);
         auto eval_loss = squared_error(eval_pred, eval_y).mean(0, false);
-        cout << "Evaluation loss: " << eval_loss[0] << endl;
+        float eval_mae = mean_absolute_error(eval_pred, eval_y);
+        cout << "Evaluation loss: " << eval_loss[0]
+             << ", MAE: " << eval_mae << endl;
 
         cout << "Example predictions:\n";
         NDArray example_x({5, 1});

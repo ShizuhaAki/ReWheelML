@@ -85,7 +85,11 @@ include/vendor/**
 # plotting 
 plot.py
 
+doc/report/.build/
+
 .codex
 
 data/**
-checkpoint/**
+checkpoints/**
+
+PJ1.pdf
