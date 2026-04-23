@@ -3,6 +3,39 @@
 #include <cassert>
 
 #include "ndarray.hpp"
+/* @doc
+# Conv2D
+
+This file implements a 2D convolution layer for tensors in `NCHW` layout:
+batch, channel, height, width. The layer stores one square kernel per
+`(out_channel, in_channel)` pair, so the learnable weight tensor has shape
+`(C_out, C_in, K, K)`, and the bias tensor has shape `(1, C_out, 1, 1)`.
+
+For an input $X \in \mathbb{R}^{N \times C_{in} \times H \times W}$, the
+output spatial dimensions are
+
+$$
+H_{out} = \left\lfloor \frac{H + 2P - K}{S} \right\rfloor + 1,
+\qquad
+W_{out} = \left\lfloor \frac{W + 2P - K}{S} \right\rfloor + 1.
+$$
+
+The direct definition of convolution is a nested sum:
+
+$$
+Y_{n,o,h,w} =
+b_o +
+\sum_{i=0}^{C_{in}-1}
+\sum_{r=0}^{K-1}
+\sum_{c=0}^{K-1}
+X_{n,i,hS+r-P,wS+c-P} W_{o,i,r,c}.
+$$
+
+This implementation does not evaluate that equation as one monolithic set of
+loops. Instead, it lowers the input into a matrix with `im2col`, reshapes the
+weights into another matrix, uses matrix multiplication for the expensive
+part, and reshapes the result back to `NCHW`.
+*/
 
 NDArray im2col(const NDArray& x, int kernel_size, int stride, int padding) {
     const int n = x.shape[0];
@@ -14,6 +47,40 @@ NDArray im2col(const NDArray& x, int kernel_size, int stride, int padding) {
 
     NDArray cols({n * h_out * w_out, channels * kernel_size * kernel_size});
     cols.fill(0.0f);
+
+/* @doc
+## IM2Col
+
+`im2col` turns every receptive field of the input into one row of a matrix.
+The matrix has
+
+- one row for every output location in every batch item: $N H_{out} W_{out}$ rows,
+- one column for every value touched by a kernel:
+  $C_{in} K^2$ columns.
+
+A row index identifies the output coordinate `(batch, oh, ow)`:
+
+$$
+row = (batch \cdot H_{out} + oh) \cdot W_{out} + ow.
+$$
+
+A column index identifies one input-channel and kernel-offset pair:
+
+$$
+col = (channel \cdot K + kh) \cdot K + kw.
+$$
+
+The corresponding input coordinate is
+
+$$
+ih = oh \cdot S + kh - P,\qquad iw = ow \cdot S + kw - P.
+$$
+
+If that coordinate falls outside the input image, the lowered matrix stores
+zero. That is exactly how zero-padding appears in the matrix form: padding is
+not materialized as a larger image, it is generated while each receptive field
+is copied.
+*/
 
 #pragma omp parallel for
     for (int batch = 0; batch < n; ++batch) {
@@ -44,6 +111,29 @@ NDArray im2col(const NDArray& x, int kernel_size, int stride, int padding) {
 
     return cols;
 }
+
+/* @doc
+## Col2Im
+
+`col2im` is the reverse accumulation used during backpropagation. The
+gradient with respect to the lowered matrix has the same shape as the matrix
+produced by `im2col`: `(N H_out W_out, C_in K^2)`.
+
+Reversing `im2col` is not just a copy. Neighboring receptive fields overlap,
+so a single input pixel may contribute to many rows of the lowered matrix.
+During the backward pass, all of those contributions must be summed into the
+same input-gradient location:
+
+$$
+\frac{\partial L}{\partial X_{n,c,h,w}}
+=
+\sum_{\text{windows covering }(h,w)}
+\frac{\partial L}{\partial cols_{row,col}}.
+$$
+
+This is why the assignment below reads the old value from `x`, adds the
+contribution from `cols`, and writes the sum back.
+*/
 
 NDArray col2im(const NDArray& cols, int n, int channels, int height, int width,
                int kernel_size, int stride, int padding) {
@@ -83,6 +173,28 @@ NDArray col2im(const NDArray& cols, int n, int channels, int height, int width,
     return x;
 }
 
+/* @doc
+## Weight Matrix View
+
+Convolution weights are stored in the natural 4D shape
+`(C_out, C_in, K, K)`, but the lowered input is a 2D matrix. To use matrix
+multiplication, the weights are viewed as
+
+$$
+W_{2d} \in \mathbb{R}^{(C_{in} K^2) \times C_{out}}.
+$$
+
+Each row corresponds to the same `(input channel, kernel row, kernel column)`
+coordinate used by `im2col`. Each column corresponds to one output channel.
+With that layout, the convolution core becomes
+
+$$
+out_{2d} = cols \cdot W_{2d},
+$$
+
+producing a matrix with shape `(N H_out W_out, C_out)`.
+*/
+
 NDArray weights_to_2d(const NDArray& w) {
     const int out_channels = w.shape[0];
     const int in_channels = w.shape[1];
@@ -105,6 +217,18 @@ NDArray weights_to_2d(const NDArray& w) {
     return w2d;
 }
 
+/* @doc
+## Restoring Weight Gradients
+
+The backward pass computes the weight gradient in the same 2D layout used for
+matrix multiplication. `weights_from_2d` maps that gradient back to the
+layer's 4D tensor layout so the optimizer can update `W` without knowing
+anything about the im2col representation.
+
+This pair of functions is deliberately symmetric: `weights_to_2d` defines the
+coordinate transform, and `weights_from_2d` applies the inverse transform.
+*/
+
 void weights_from_2d(const NDArray& w2d, NDArray& w) {
     const int out_channels = w.shape[0];
     const int in_channels = w.shape[1];
@@ -124,6 +248,21 @@ void weights_from_2d(const NDArray& w2d, NDArray& w) {
     }
 }
 
+/* @doc
+## Layer State
+
+A `Conv2D` object owns both parameters and gradient buffers:
+
+- `W` stores the convolution kernels,
+- `b` stores one scalar bias per output channel,
+- `dW` and `db` store gradients with matching shapes.
+
+The constructor records the structural hyperparameters (`in_channels`,
+`out_channels`, `kernel_size`, `stride`, and `padding`) and initializes the
+parameters. Weights use the project-wide `init_weights` helper, while biases
+start at zero.
+*/
+
 Conv2D::Conv2D(int in_channels, int out_channels, int kernel_size, int stride,
                int padding)
     : in_channels(in_channels),
@@ -139,6 +278,31 @@ Conv2D::Conv2D(int in_channels, int out_channels, int kernel_size, int stride,
     b.fill(0.0f);
 }
 
+/* @doc
+## Forward Pass
+
+The forward pass checks the input contract, caches the input for the backward
+pass, computes the output size, and lowers the input with `im2col`.
+
+After lowering, the expensive part is a single matrix multiplication:
+
+$$
+cols \in \mathbb{R}^{(N H_{out} W_{out}) \times (C_{in}K^2)},\quad
+W_{2d} \in \mathbb{R}^{(C_{in}K^2) \times C_{out}},
+$$
+
+$$
+out_{2d} = cols W_{2d}.
+$$
+
+The final loop reshapes `out2d` back into `(N, C_out, H_out, W_out)` and adds
+the channel bias. The bias is broadcast over batch and spatial dimensions:
+
+$$
+Y_{n,o,h,w} = out2d_{row,o} + b_o.
+$$
+*/
+
 NDArray Conv2D::forward(const NDArray& x) {
     assert(x.ndim == 4);
     assert(x.shape[1] == in_channels);
@@ -149,6 +313,18 @@ NDArray Conv2D::forward(const NDArray& x) {
     const int width = x.shape[3];
     const int h_out = (height + 2 * padding - kernel_size) / stride + 1;
     const int w_out = (width + 2 * padding - kernel_size) / stride + 1;
+
+/* @doc
+`col_cache` is saved because the weight gradient is easiest to compute from
+the lowered input:
+
+$$
+\frac{\partial L}{\partial W_{2d}} = cols^T
+\frac{\partial L}{\partial out_{2d}}.
+$$
+
+Keeping the cache avoids recomputing `im2col` during `backward`.
+*/
 
     col_cache = im2col(x, kernel_size, stride, padding);
     NDArray w2d = weights_to_2d(W);
@@ -170,6 +346,42 @@ NDArray Conv2D::forward(const NDArray& x) {
 
     return out;
 }
+
+/* @doc
+## Backward Pass
+
+The incoming gradient `grad_out` has the same layout as the forward output:
+`(N, C_out, H_out, W_out)`. The backward pass reshapes it into
+`grad2d`, aligned with the rows of `out2d`.
+
+From the matrix equation
+
+$$
+out_{2d} = cols W_{2d},
+$$
+
+the gradients follow the standard matrix-calculus identities:
+
+$$
+\frac{\partial L}{\partial W_{2d}} = cols^T
+\frac{\partial L}{\partial out_{2d}},
+\qquad
+\frac{\partial L}{\partial cols} =
+\frac{\partial L}{\partial out_{2d}} W_{2d}^T.
+$$
+
+The bias gradient is the sum of `grad2d` over every batch and spatial row:
+
+$$
+\frac{\partial L}{\partial b_o}
+=
+\sum_{row}
+\frac{\partial L}{\partial out_{2d,row,o}}.
+$$
+
+Finally, `col2im` accumulates the lowered input gradient back into the
+original input shape.
+*/
 
 NDArray Conv2D::backward(const NDArray& grad_out) {
     assert(grad_out.ndim == 4);
@@ -211,6 +423,7 @@ NDArray Conv2D::backward(const NDArray& grad_out) {
                         stride, padding);
     return dX;
 }
+
 
 void Conv2D::step(float lr) {
     W = W - dW * lr;

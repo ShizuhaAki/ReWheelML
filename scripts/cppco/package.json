@@ -1,0 +1,25 @@
+{
+  "name": "cppco",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "build": "node server.mjs --build"
+  },
+  "dependencies": {
+    "@highlightjs/cdn-assets": "^11.11.1",
+    "katex": "^0.16.22",
+    "markdown-it": "^14.1.0",
+    "markdown-it-katex": "^2.0.3",
+    "vite": "^5.4.19"
+  },
+  "overrides": {
+    "markdown-it-katex": {
+      "katex": "$katex"
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
