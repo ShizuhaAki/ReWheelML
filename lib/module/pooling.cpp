@@ -5,8 +5,54 @@
 
 #include "ndarray.hpp"
 
+/* @doc
+# MaxPool2D
+
+This file implements max pooling for 4D feature maps in `NCHW` layout. Pooling
+does not mix channels: each output value is computed from one square spatial
+window inside the same `(batch, channel)` slice.
+
+For input $X \in \mathbb{R}^{N \times C \times H \times W}$, pool size $K$,
+and stride $S$, the output spatial dimensions are
+
+$$
+H_{out} = \left\lfloor \frac{H - K}{S} \right\rfloor + 1,
+\qquad
+W_{out} = \left\lfloor \frac{W - K}{S} \right\rfloor + 1.
+$$
+
+There is no padding in this implementation. Windows that would extend past the
+right or bottom edge are not emitted.
+*/
+
 MaxPool2D::MaxPool2D(int pool_size, int stride)
     : pool_size(pool_size), stride(stride) {}
+
+/* @doc
+## Forward Pass
+
+For every output coordinate `(n, c, oh, ow)`, the corresponding input window
+starts at
+
+$$
+ih_0 = oh \cdot S,\qquad iw_0 = ow \cdot S.
+$$
+
+The output is the largest value in the $K \times K$ window:
+
+$$
+Y_{n,c,oh,ow}
+=
+\max_{0 \le ph,pw < K}
+X_{n,c,ohS+ph,owS+pw}.
+$$
+
+Besides writing the maximum value, the forward pass records the input location
+where that maximum occurred. `max_h_cache` stores the winning input row and
+`max_w_cache` stores the winning input column for each output element. Those
+argmax caches are the only information needed to route gradients in the
+backward pass.
+*/
 
 NDArray MaxPool2D::forward(const NDArray& x) {
     assert(x.ndim == 4);
@@ -51,6 +97,25 @@ NDArray MaxPool2D::forward(const NDArray& x) {
     }
     return out;
 }
+
+/* @doc
+## Backward Pass
+
+Max pooling has no gradient for non-maximum elements in a window. During
+backpropagation, each upstream gradient is added only to the input element that
+won the corresponding forward window:
+
+$$
+\frac{\partial L}{\partial X_{n,c,ih,iw}}
+\mathrel{+}=
+\frac{\partial L}{\partial Y_{n,c,oh,ow}}
+\quad \text{where } (ih, iw) = argmax(oh, ow).
+$$
+
+The implementation reads `(ih, iw)` from the argmax caches populated by
+`forward`. The input-gradient tensor starts at zero, so if overlapping pooling
+windows choose the same input element, their gradient contributions are summed.
+*/
 
 NDArray MaxPool2D::backward(const NDArray& grad_out) {
     assert(grad_out.ndim == 4);

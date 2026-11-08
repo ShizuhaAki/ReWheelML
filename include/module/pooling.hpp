@@ -16,5 +16,13 @@ class MaxPool2D : public Module {
 
     NDArray forward(const NDArray& x) override;
     NDArray backward(const NDArray& grad_out) override;
+
+    /* @doc
+    ## Optimizer Step
+
+    Max pooling has no weights or biases. `step` is therefore a no-op: the
+    layer participates in forward and backward propagation, but there are no
+    parameters for an optimizer to update.
+    */
     void step(float /*lr*/) override {}
 };

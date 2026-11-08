@@ -28,6 +28,7 @@ Makefile
 *.dll
 *.so
 *.dylib
+*.zip
 
 # ---- Object files ----
 
@@ -72,6 +73,8 @@ gmon.out
 .DS_Store
 Thumbs.db
 .cache
+.vite/
+node_modules/
 
 # ---- Misc ----
 
@@ -86,10 +89,11 @@ include/vendor/**
 plot.py
 
 doc/report/.build/
-
+doc/source-booklet/
 .codex
 
 data/**
 checkpoints/**
 
 PJ1.pdf
+inference.md

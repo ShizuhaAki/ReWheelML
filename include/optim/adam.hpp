@@ -36,7 +36,7 @@ class Adam : public Optimizer {
     pairs. Adam adds the hyperparameters and the running buffers needed by the
     update rule.
 
-    - `lr` is the global learning-rate scale $\alpha$.
+    - `lr` is the global learning-rate scale $\alpha$ 
     - `beta1` controls how slowly the first moment `m` changes.
     - `beta2` controls how slowly the second moment `v` changes.
     - `eps` prevents division by zero when `v` is very small.
